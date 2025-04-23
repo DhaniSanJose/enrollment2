@@ -1,24 +1,28 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
-import { Box, Button, Typography, Table, TableBody, TableCell, TableHead, TableRow, Paper } from "@mui/material";
-
-const userId = 20170071;
+import { Box, Button, Typography, Table, TableBody, TableCell, TableHead, TableRow, Paper, TextField } from "@mui/material";
 
 const CourseTagging = () => {
   const [courses, setCourses] = useState([]);
   const [enrolled, setEnrolled] = useState([]);
+  const [studentNumber, setStudentNumber] = useState("");
+  const [userId, setUserId] = useState(null); // Dynamic userId
 
   useEffect(() => {
     axios
       .get("http://localhost:5000/courses")
       .then((res) => setCourses(res.data))
       .catch((err) => console.error(err));
-
-    axios
-      .get(`http://localhost:5000/enrolled_courses/${userId}`)
-      .then((res) => setEnrolled(res.data))
-      .catch((err) => console.error(err));
   }, []);
+
+  useEffect(() => {
+    if (userId) {
+      axios
+        .get(`http://localhost:5000/enrolled_courses/${userId}`)
+        .then((res) => setEnrolled(res.data))
+        .catch((err) => console.error(err));
+    }
+  }, [userId]);
 
   const isEnrolled = (subject_id) => enrolled.some((item) => item.subject_id === subject_id);
 
@@ -32,24 +36,17 @@ const CourseTagging = () => {
             ...prev,
             {
               subject_id: course.subject_id,
-              subject_code: course.subject_code, // include subject_code
+              subject_code: course.subject_code,
             },
           ])
         )
         .catch((err) => console.error(err));
     }
   };
-  
-  
+
   const addAllToCart = async () => {
     const newCourses = courses.filter((c) => !isEnrolled(c.subject_id) && c.year_level_id === 1);
-
-    console.log("Courses to enroll:", newCourses); // 👈 Check this
-
-    if (newCourses.length === 0) {
-      console.warn("No eligible courses to enroll.");
-      return;
-    }
+    if (newCourses.length === 0) return;
 
     try {
       await Promise.all(
@@ -60,7 +57,6 @@ const CourseTagging = () => {
           })
         )
       );
-
       const { data } = await axios.get(`http://localhost:5000/enrolled_courses/${userId}`);
       setEnrolled(data);
     } catch (err) {
@@ -68,17 +64,6 @@ const CourseTagging = () => {
     }
   };
 
-
-
-
-
-
-
-
-
-
-
-  
   const deleteFromCart = (subject_id) => {
     axios
       .delete(`http://localhost:5000/courses/delete/${subject_id}/${userId}`)
@@ -93,13 +78,43 @@ const CourseTagging = () => {
       .catch((err) => console.error(err));
   };
 
+  const handleSearchStudent = async () => {
+    if (!studentNumber) {
+      alert("Please fill in all fields");
+      return;
+    }
+
+    try {
+      const response = await axios.post("http://localhost:5000/student-tagging", { studentNumber }, { headers: { "Content-Type": "application/json" } });
+
+      const { token, studentNumber: studentNum, activeCurriculum, yearLevel } = response.data;
+
+      localStorage.setItem("token", token);
+      localStorage.setItem("studentNumber", studentNum);
+      localStorage.setItem("activeCurriculum", activeCurriculum);
+      localStorage.setItem("yearLevel", yearLevel);
+
+      setUserId(studentNum); // Set as dynamic userId
+      alert("Student found and authenticated!");
+    } catch (error) {
+      alert(error.response?.data?.message || "Student not found");
+    }
+  };
+
   return (
     <Box p={4} display="grid" gridTemplateColumns="1fr 1fr" gap={4}>
-      {/* Course List */}
-
+      {/* Available Courses */}
       <Box component={Paper} p={2}>
+        {/* Search Student */}
+        <Box>
+          <Typography variant="h4">Search Student</Typography>
+          <TextField label="Student Number" fullWidth margin="normal" value={studentNumber} onChange={(e) => setStudentNumber(e.target.value)} />
+          <Button variant="contained" color="primary" fullWidth onClick={handleSearchStudent}>
+            Search
+          </Button>
+        </Box>
         <Box mt={2}>
-          <Button variant="contained" color="success" onClick={addAllToCart}>
+          <Button variant="contained" color="success" onClick={addAllToCart} disabled={!userId}>
             Enroll All
           </Button>
         </Box>
@@ -112,7 +127,7 @@ const CourseTagging = () => {
           <TableHead>
             <TableRow>
               <TableCell>Course Code</TableCell>
-              {/* <TableCell>Course Name</TableCell> */}
+              <TableCell>Subject ID</TableCell>
               <TableCell>Action</TableCell>
             </TableRow>
           </TableHead>
@@ -121,10 +136,9 @@ const CourseTagging = () => {
               <TableRow key={c.course_tagging_table_id}>
                 <TableCell>{c.subject_code}</TableCell>
                 <TableCell>{c.subject_id}</TableCell>
-                {/* <TableCell>{c.subject_description}</TableCell> */}
                 <TableCell>
                   {!isEnrolled(c.subject_id) ? (
-                    <Button variant="contained" size="small" onClick={() => addToCart(c)}>
+                    <Button variant="contained" size="small" onClick={() => addToCart(c)} disabled={!userId}>
                       Enroll
                     </Button>
                   ) : (

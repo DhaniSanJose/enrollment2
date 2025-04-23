@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2");
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
 
 const app = express();
 app.use(cors());
@@ -59,10 +61,6 @@ app.get("/enrolled_courses/:userId", (req, res) => {
     res.json(result);
   });
 });
-
-
-
-
 
 app.post("/add-all-to-enrolled-courses", (req, res) => {
   const { subject_id, user_id } = req.body;
@@ -126,20 +124,6 @@ app.post("/add-all-to-enrolled-courses", (req, res) => {
   });
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Add a course to enrolled_subject table (simulate cart)
 app.post("/add-to-enrolled-courses", (req, res) => {
   const { subject_id, user_id } = req.body;
@@ -167,6 +151,75 @@ app.delete("/courses/user/:userId", (req, res) => {
   db.query(sql, [userId], (err, result) => {
     if (err) return res.status(500).json(err);
     res.json({ message: "All courses unenrolled successfully" });
+  });
+});
+
+// Login User
+app.post("/student-tagging", (req, res) => {
+  const { studentNumber } = req.body;
+
+  if (!studentNumber) {
+    return res.status(400).json({ message: "All fields are required" });
+  }
+
+  const sql = "SELECT * FROM student_status WHERE student_number = ?";
+  db.query(sql, [studentNumber], async (err, results) => {
+    if (err) {
+      console.error("SQL error:", err);
+      return res.status(500).json({ message: "Database error" });
+    }
+
+    console.log("Query Results:", results);
+
+    if (results.length === 0) {
+      return res.status(400).json({ message: "Invalid Student Number" });
+    }
+
+    const student = results[0];
+    const token = jwt.sign(
+      {
+        id: student.student_status_id,
+        studentNumber: student.student_number,
+        activeCurriculum: student.active_curriculum,
+        yearLevel: student.year_level_id,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    console.log("Search response:", {
+      token,
+      studentNumber: student.student_number,
+      activeCurriculum: student.active_curriculum,
+      yearLevel: student.year_level_id,
+    });
+
+    res.json({
+      message: "Search successful",
+      token,
+      studentNumber: student.student_number,
+      activeCurriculum: student.active_curriculum,
+      yearLevel: student.year_level_id,
+    });
+  });
+});
+
+let lastSeenId = 0;
+
+app.get("/check-new", (req, res) => {
+  db.query("SELECT * FROM enrolled_subject ORDER BY id DESC LIMIT 1", (err, results) => {
+    if (err) return res.status(500).json({ error: err });
+
+    if (results.length > 0) {
+      const latest = results[0];
+      const isNew = latest.id > lastSeenId;
+      if (isNew) {
+        lastSeenId = latest.id;
+      }
+      res.json({ newData: isNew, data: latest });
+    } else {
+      res.json({ newData: false });
+    }
   });
 });
 
