@@ -65,17 +65,40 @@ app.get("/enrolled_courses/:userId/:currId", (req, res) => {
 
     // Step 2: Use the active_school_year_id in the enrolled courses query
     const sql = `
-      SELECT 
-        es.id,
-        es.subject_id,
-        s.subject_code,
-        s.subject_description
-      FROM enrolled_subject AS es
-      INNER JOIN subject_table AS s ON s.subject_id = es.subject_id
-      WHERE es.student_number = ? 
-        AND es.active_school_year_id = ?
-        AND es.curriculum_id = ?
-      ORDER BY s.subject_id ASC
+          SELECT 
+          es.id,
+          es.subject_id,
+          s.subject_code,
+          s.subject_description,
+          st.section_description,
+          ds.department_section_id,
+          ct.course_code,
+          rd.day_description
+          FROM enrolled_subject AS es
+          INNER JOIN subject_table AS s 
+          ON s.subject_id = es.subject_id
+
+
+          INNER JOIN department_section AS ds
+          ON ds.department_section_id = es.department_section_id
+          INNER JOIN section_table st
+          ON st.section_id = ds.section_id
+
+          INNER JOIN curriculum AS cr
+          ON cr.curriculum_id = ds.curriculum_id
+          INNER JOIN course_table AS ct
+          ON ct.course_id = cr.course_id 
+
+          INNER JOIN time_table as tt
+          ON tt.school_year_id = es.active_school_year_id AND tt.department_section_id =  es.department_section_id AND tt.subject_id = es.subject_id
+
+          INNER JOIN room_day as rd
+          ON rd.day_id = tt.room_day
+
+          WHERE es.student_number = ? 
+          AND es.active_school_year_id = ?
+          AND es.curriculum_id = ?
+          ORDER BY s.subject_id ASC;
     `;
 
     db.query(sql, [userId, activeSchoolYearId, currId], (err, result) => {
@@ -173,8 +196,8 @@ app.post("/add-all-to-enrolled-courses", (req, res) => {
   });
 });
 
-app.post("/add-to-enrolled-courses/:userId/:currId", (req, res) => {
-  const { subject_id } = req.body;
+app.post("/add-to-enrolled-courses/:userId/:currId/", (req, res) => {
+  const { subject_id, department_section_id } = req.body;
   const { userId, currId } = req.params;
 
   const activeYearSql = `SELECT active_school_year_id FROM active_school_year WHERE astatus = 1 LIMIT 1`;
@@ -191,8 +214,8 @@ app.post("/add-to-enrolled-courses/:userId/:currId", (req, res) => {
 
     const activeSchoolYearId = yearResult[0].active_school_year_id;
 
-    const sql = "INSERT INTO enrolled_subject (subject_id, student_number, active_school_year_id, curriculum_id) VALUES (?, ?, ?, ?)";
-    db.query(sql, [subject_id, userId, activeSchoolYearId, currId], (err, result) => {
+    const sql = "INSERT INTO enrolled_subject (subject_id, student_number, active_school_year_id, curriculum_id, department_section_id) VALUES (?, ?, ?, ?, ?)";
+    db.query(sql, [subject_id, userId, activeSchoolYearId, currId, department_section_id], (err, result) => {
       if (err) return res.status(500).json(err);
       res.json({ message: "Course enrolled successfully" });
     });

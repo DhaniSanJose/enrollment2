@@ -67,9 +67,9 @@ const CourseTagging = () => {
 
   const addToCart = async (course) => {
     if (!isEnrolled(course.subject_id)) {
-      const payload = { subject_id: course.subject_id };
+      const payload = { subject_id: course.subject_id, department_section_id: selectedSection };
       try {
-        await axios.post(`http://localhost:5000/add-to-enrolled-courses/${userId}/${currId}`, payload);
+        await axios.post(`http://localhost:5000/add-to-enrolled-courses/${userId}/${currId}/`, payload);
 
         // Refresh enrolled courses list after adding
         const { data } = await axios.get(`http://localhost:5000/enrolled_courses/${userId}/${currId}`);
@@ -92,6 +92,7 @@ const CourseTagging = () => {
               subject_id: course.subject_id,
               user_id: userId,
               curriculumID: currId, // Include curriculum_id
+              departmentSectionID: selectedSection, // Include selected section
             });
             console.log(`Response for subject ${course.subject_id}:`, res.data.message);
           } catch (err) {
@@ -259,18 +260,24 @@ const CourseTagging = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Enrolled Subject ID</TableCell>
-              <TableCell>Subject ID</TableCell>
+              <TableCell style={{ display: "none" }}>Enrolled Subject ID</TableCell>
+              <TableCell style={{ display: "none" }}>Subject ID</TableCell>
+              <TableCell>Section</TableCell>
               <TableCell>Subject Code</TableCell>
+              <TableCell>Day</TableCell>
               <TableCell>Action</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {enrolled.map((e, idx) => (
               <TableRow key={idx}>
-                <TableCell>{e.id}</TableCell>
-                <TableCell>{e.subject_id}</TableCell>
+                <TableCell style={{ display: "none" }}>{e.id}</TableCell>
+                <TableCell style={{ display: "none" }}>{e.subject_id}</TableCell>
+                <TableCell>
+                  {e.course_code}-{e.section_description}
+                </TableCell>
                 <TableCell>{e.subject_code}</TableCell>
+                <TableCell>{e.day_description}</TableCell>
                 <TableCell>
                   <Button variant="contained" color="error" size="small" onClick={() => deleteFromCart(e.id)}>
                     Unenroll
