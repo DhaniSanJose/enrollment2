@@ -4,28 +4,27 @@ const mysql = require("mysql2");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
-
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static('uploads'));
+app.use("/uploads", express.static("uploads"));
 
-
-
-
-
-
-
-const db = mysql.createConnection({ 
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "cmu_mis", 
-});
+// Create a pool instead of a single connection
+const db = mysql
+  .createPool({
+    host: "localhost",
+    user: "root",
+    password: "",
+    database: "cmu_mis",
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  })
+  .promise(); // <-- IMPORTANT!!!
 
 // Corrected route with parameter
 app.get("/courses/:currId", (req, res) => {
@@ -113,7 +112,7 @@ app.get("/enrolled_courses/:userId/:currId", (req, res) => {
     LEFT JOIN time_table AS tt
       ON tt.school_year_id = es.active_school_year_id 
       AND tt.department_section_id = es.department_section_id 
-      AND tt.subject_id = es.subject_id
+      AND tt.subject_id = es.subject_id 
     LEFT JOIN room_day AS rd
       ON rd.day_id = tt.room_day
       LEFT JOIN department_room as dr
@@ -127,7 +126,6 @@ app.get("/enrolled_courses/:userId/:currId", (req, res) => {
       AND es.curriculum_id = ?
     ORDER BY s.subject_id ASC;
   `;
-  
 
     db.query(sql, [userId, activeSchoolYearId, currId], (err, result) => {
       if (err) {
@@ -382,7 +380,6 @@ app.get("/check-new", (req, res) => {
   });
 });
 
-
 app.get("/api/department-sections", (req, res) => {
   const { departmentId } = req.query;
 
@@ -408,10 +405,6 @@ app.get("/api/department-sections", (req, res) => {
   });
 });
 
-
-
-
-
 // Express route
 app.get("/departments", (req, res) => {
   const sql = "SELECT department_id, department_code FROM department_table";
@@ -424,12 +417,6 @@ app.get("/departments", (req, res) => {
     res.json(result);
   });
 });
-
-
-
-
-
-
 
 // 📌 Count how many students enrolled per subject for a selected section
 app.get("/subject-enrollment-count", (req, res) => {
@@ -471,11 +458,8 @@ app.get("/subject-enrollment-count", (req, res) => {
 
 //-----------------------------------------------------------------------------------------------------------------------------------
 
-
-
-
 // Create uploads folder if it doesn't exist
-const uploadPath = path.join(__dirname, 'uploads');
+const uploadPath = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadPath)) {
   fs.mkdirSync(uploadPath, { recursive: true });
 }
@@ -487,7 +471,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    const randomName = Date.now() + '-' + Math.round(Math.random() * 1E9) + ext;
+    const randomName = Date.now() + "-" + Math.round(Math.random() * 1e9) + ext;
     cb(null, randomName);
   },
 });
@@ -497,18 +481,18 @@ const upload = multer({ storage });
 // Routes
 
 // Register new user
-app.post('/api/register', (req, res) => {
+app.post("/api/register", (req, res) => {
   const { first_name, middle_name, last_name } = req.body;
 
   if (!first_name || !last_name) {
-    return res.status(400).send('First name and last name are required');
+    return res.status(400).send("First name and last name are required");
   }
 
-  const sql = 'INSERT INTO person_table (first_name, middle_name, last_name) VALUES (?, ?, ?)';
+  const sql = "INSERT INTO person_table (first_name, middle_name, last_name) VALUES (?, ?, ?)";
   db.query(sql, [first_name, middle_name, last_name], (err, result) => {
     if (err) {
-      console.error('Database error:', err);
-      return res.status(500).send('Error registering user');
+      console.error("Database error:", err);
+      return res.status(500).send("Error registering user");
     }
 
     const person_id = result.insertId;
@@ -517,14 +501,14 @@ app.post('/api/register', (req, res) => {
 });
 
 // Upload profile picture
-app.post('/api/upload-profile-picture', upload.single('profile_picture'), (req, res) => {
+app.post("/api/upload-profile-picture", upload.single("profile_picture"), (req, res) => {
   if (!req.file) {
-    return res.status(400).send('No file uploaded');
+    return res.status(400).send("No file uploaded");
   }
 
   const { person_id } = req.body;
   if (!person_id) {
-    return res.status(400).send('Missing person_id');
+    return res.status(400).send("Missing person_id");
   }
 
   const oldPath = req.file.path;
@@ -535,52 +519,125 @@ app.post('/api/upload-profile-picture', upload.single('profile_picture'), (req, 
   // Rename the uploaded file
   fs.rename(oldPath, newPath, (err) => {
     if (err) {
-      console.error('Error renaming file:', err);
-      return res.status(500).send('Error processing profile picture');
+      console.error("Error renaming file:", err);
+      return res.status(500).send("Error processing profile picture");
     }
 
-    const sql = 'UPDATE person_table SET profile_picture = ? WHERE person_id = ?';
+    const sql = "UPDATE person_table SET profile_picture = ? WHERE person_id = ?";
     db.query(sql, [newFilename, person_id], (err) => {
       if (err) {
-        console.error('Database error:', err);
-        return res.status(500).send('Error saving profile picture');
+        console.error("Database error:", err);
+        return res.status(500).send("Error saving profile picture");
       }
-      res.send('Profile picture uploaded successfully');
+      res.send("Profile picture uploaded successfully");
     });
   });
 });
 
 // Serve uploaded images statically
-app.use('/uploads', express.static(uploadPath));
-
-
+app.use("/uploads", express.static(uploadPath));
 
 //------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-
-
 // Get user by person_id
-app.get('/api/user/:person_id', (req, res) => {
+app.get("/api/user/:person_id", (req, res) => {
   const { person_id } = req.params;
 
-  const sql = 'SELECT profile_picture FROM person_table WHERE person_id = ?';
+  const sql = "SELECT profile_picture FROM person_table WHERE person_id = ?";
   db.query(sql, [person_id], (err, results) => {
     if (err) {
-      console.error('Database error:', err);
-      return res.status(500).send('Database error');
+      console.error("Database error:", err);
+      return res.status(500).send("Database error");
     }
 
     if (results.length === 0) {
-      return res.status(404).send('User not found');
+      return res.status(404).send("User not found");
     }
 
     res.json(results[0]);
   });
 });
 
+// ------------------------------------------------------------------------------------------------------------ STUDENT NUMBER
 
+// Fetch persons who are not yet assigned a student number
+// Use async function to handle top-level async code
 
+// Fetch persons who are not yet assigned a student number
+app.get("/api/persons", async (req, res) => {
+  const connection = await db.getConnection();
+  try {
+    const [rows] = await connection.query(`
+              SELECT p.* 
+              FROM person_table p
+              JOIN person_status_table ps ON p.person_id = ps.person_id
+              WHERE ps.student_registration_status = 0
+          `);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
+  } finally {
+    connection.release(); // Release the connection back to the pool
+  }
+});
 
+// Assign a student number
+app.post("/api/assign-student-number", async (req, res) => {
+  const connection = await db.getConnection();
+  try {
+    const { person_id } = req.body;
+
+    if (!person_id) {
+      return res.status(400).send("person_id is required");
+    }
+
+    // Get active year
+    const [yearRows] = await connection.query("SELECT * FROM year_table WHERE status = 1 LIMIT 1");
+    if (yearRows.length === 0) {
+      return res.status(400).send("No active year found");
+    }
+    const year = yearRows[0];
+
+    // Get counter
+    const [counterRows] = await connection.query("SELECT * FROM student_counter WHERE que_number_id = 1");
+    if (counterRows.length === 0) {
+      return res.status(400).send("No counter found");
+    }
+    let que_number = counterRows[0].que_number;
+
+    // Fix: if que_number is 0, still generate '00001'
+    que_number = que_number + 1;
+
+    let numberStr = que_number.toString();
+    while (numberStr.length < 5) {
+      numberStr = "0" + numberStr;
+    }
+    const student_number = `${year.year_description}${numberStr}`;
+
+    // Check if already assigned
+    const [existingRows] = await connection.query("SELECT * FROM student_numbering WHERE person_id = ?", [person_id]);
+    if (existingRows.length > 0) {
+      return res.status(400).send("Student number already assigned.");
+    }
+
+    // Insert into student_numbering
+    await connection.query("INSERT INTO student_numbering (student_number, person_id) VALUES (?, ?)", [student_number, person_id]);
+
+    // Update counter
+    await connection.query("UPDATE student_counter SET que_number = ?", [que_number]);
+
+    // Update person_status_table
+    await connection.query("UPDATE person_status_table SET student_registration_status = 1 WHERE person_id = ?", [person_id]);
+
+    res.json({ student_number });
+  } catch (err) {
+    console.error("Server error:", err);
+    res.status(500).send("Server error");
+  } finally {
+    connection.release(); // Release the connection back to the pool
+  }
+});
 
 app.listen(5000, () => {
   console.log("Server running on port 5000");
