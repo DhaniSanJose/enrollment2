@@ -4,6 +4,11 @@ const mysql = require("mysql2/promise"); // Changed to promise-based API
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
+// for email
+const bodyParser = require("body-parser");
+const nodemailer = require("nodemailer");
+
+
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -13,6 +18,8 @@ app.use(cors());
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
+app.use(bodyParser.json());
+
 // Create a pool instead of a single connection
 const pool = mysql.createPool({
   host: "localhost",
@@ -21,7 +28,17 @@ const pool = mysql.createPool({
   database: "cmu_mis",
   waitForConnections: true,
   connectionLimit: 10, // Default is 10
-  queueLimit: 0 // Unlimited queue
+  queueLimit: 0, // Unlimited queue
+});
+
+
+// ✅ Nodemailer configuration
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: "disanjose@earist.edu.ph", // EARIST Google Workspace
+    pass: "kxzy mtyx ctib egzn", // App password
+  },
 });
 
 // Corrected route with parameter
@@ -220,7 +237,7 @@ app.post("/add-to-enrolled-courses/:userId/:currId/", async (req, res) => {
 // Delete course by subject_id
 app.delete("/courses/delete/:id", async (req, res) => {
   const { id } = req.params;
-  
+
   try {
     const sql = "DELETE FROM enrolled_subject WHERE id = ?";
     await pool.query(sql, [id]);
@@ -233,7 +250,7 @@ app.delete("/courses/delete/:id", async (req, res) => {
 // Delete all courses for user
 app.delete("/courses/user/:userId", async (req, res) => {
   const { userId } = req.params;
-  
+
   try {
     const activeYearSql = `SELECT active_school_year_id FROM active_school_year WHERE astatus = 1 LIMIT 1`;
     const [yearResult] = await pool.query(activeYearSql);
@@ -274,7 +291,7 @@ app.post("/student-tagging", async (req, res) => {
     ON ptbl.person_id = sn.person_id
 
     WHERE ss.student_number = ?`;
-    
+
     const [results] = await pool.query(sql, [studentNumber]);
     console.log("Query Results:", results);
 
@@ -334,7 +351,7 @@ let lastSeenId = 0;
 app.get("/check-new", async (req, res) => {
   try {
     const [results] = await pool.query("SELECT * FROM enrolled_subject ORDER BY id DESC LIMIT 1");
-    
+
     if (results.length > 0) {
       const latest = results[0];
       const isNew = latest.id > lastSeenId;
@@ -533,68 +550,276 @@ app.get("/api/persons", async (req, res) => {
   }
 });
 
-// Assign a student number
+// // Assign a student number
+// app.post("/api/assign-student-number", async (req, res) => {
+//   const connection = await pool.getConnection();
+
+//   try {
+//     const { person_id, curriculum_id } = req.body;
+
+//     if (!person_id) {
+//       return res.status(400).send("person_id is required");
+//     }
+
+//     await connection.beginTransaction();
+
+//     // Get active year
+//     const [yearRows] = await connection.query("SELECT * FROM year_table WHERE status = 1 LIMIT 1");
+//     if (yearRows.length === 0) {
+//       await connection.rollback();
+//       return res.status(400).send("No active year found");
+//     }
+//     const year = yearRows[0];
+
+//     // Get counter
+//     const [counterRows] = await connection.query("SELECT * FROM student_counter WHERE que_number_id = 1");
+//     if (counterRows.length === 0) {
+//       await connection.rollback();
+//       return res.status(400).send("No counter found");
+//     }
+//     let que_number = counterRows[0].que_number;
+
+//     // Fix: if que_number is 0, still generate '00001'
+//     que_number = que_number + 1;
+
+//     let numberStr = que_number.toString();
+//     while (numberStr.length < 5) {
+//       numberStr = "0" + numberStr;
+//     }
+//     const student_number = `${year.year_description}${numberStr}`;
+
+//     // Check if already assigned
+//     const [existingRows] = await connection.query("SELECT * FROM student_numbering WHERE person_id = ?", [person_id]);
+//     if (existingRows.length > 0) {
+//       await connection.rollback();
+//       return res.status(400).send("Student number already assigned.");
+//     }
+
+//       // Step 1: Get the active_school_year_id
+//       const activeYearSql = `SELECT active_school_year_id FROM active_school_year WHERE astatus = 1 LIMIT 1`;
+//       const [yearResult] = await pool.query(activeYearSql);
+
+//       if (yearResult.length === 0) {
+//         return res.status(404).json({ error: "No active school year found" });
+//       }
+
+//       const activeSchoolYearId = yearResult[0].active_school_year_id;
+
+//     // Insert into student_numbering
+//     await connection.query("INSERT INTO student_numbering (student_number, person_id) VALUES (?, ?)", [student_number, person_id]);
+
+//     // Insert into student_status
+//     await connection.query("INSERT INTO student_status (student_number, active_curriculum, active_school_year_id) VALUES (?, ?, ?)", [student_number, curriculum_id, activeSchoolYearId]);
+
+//     // Update counter
+//     await connection.query("UPDATE student_counter SET que_number = ?", [que_number]);
+
+//     // Update person_status_table
+//     await connection.query("UPDATE person_status_table SET student_registration_status = 1 WHERE person_id = ?", [person_id]);
+
+//     await connection.commit();
+//     res.json({ student_number });
+//   } catch (err) {
+//     await connection.rollback();
+//     console.error("Server error:", err);
+//     res.status(500).send("Server error");
+//   } finally {
+//     connection.release(); // Release the connection back to the pool
+//   }
+// });
+
+
+// VERSION 2
+
+// app.post("/api/assign-student-number", async (req, res) => {
+//   const connection = await pool.getConnection();
+
+//   try {
+//     const { person_id, curriculum_id } = req.body;
+
+//     if (!person_id) return res.status(400).json({ error: "person_id is required" });
+//     if (!curriculum_id) return res.status(400).json({ error: "curriculum_id is required" });
+
+//     await connection.beginTransaction();
+
+//     // Get active year
+//     const [yearRows] = await connection.query("SELECT * FROM year_table WHERE status = 1 LIMIT 1");
+//     if (yearRows.length === 0) {
+//       await connection.rollback();
+//       return res.status(400).json({ error: "No active year found" });
+//     }
+//     const year = yearRows[0];
+
+//     // Get counter
+//     const [counterRows] = await connection.query("SELECT * FROM student_counter WHERE que_number_id = 1");
+//     if (counterRows.length === 0) {
+//       await connection.rollback();
+//       return res.status(400).json({ error: "No counter found" });
+//     }
+//     let que_number = counterRows[0].que_number + 1;
+
+//     // Generate padded student number
+//     let numberStr = que_number.toString().padStart(5, "0");
+//     const student_number = `${year.year_description}${numberStr}`;
+
+//     // Check if already assigned
+//     const [existingRows] = await connection.query("SELECT * FROM student_numbering WHERE person_id = ?", [person_id]);
+//     if (existingRows.length > 0) {
+//       await connection.rollback();
+//       return res.status(400).json({ error: "Student number already assigned." });
+//     }
+
+//     // Get active school year
+//     const [yearResult] = await connection.query("SELECT active_school_year_id FROM active_school_year WHERE astatus = 1 LIMIT 1");
+//     if (yearResult.length === 0) {
+//       await connection.rollback();
+//       return res.status(400).json({ error: "No active school year found" });
+//     }
+//     const activeSchoolYearId = yearResult[0].active_school_year_id;
+
+//     // Insert student number
+//     await connection.query("INSERT INTO student_numbering (student_number, person_id) VALUES (?, ?)", [student_number, person_id]);
+
+//     // Insert student status
+//     await connection.query("INSERT INTO student_status (student_number, active_curriculum, active_school_year_id, enrolled_status, year_level_id) VALUES (?, ?, ?, 0, 1)", [student_number, curriculum_id, activeSchoolYearId]);
+
+//     // Update counter
+//     await connection.query("UPDATE student_counter SET que_number = ?", [que_number]);
+
+//     // Update person status
+//     await connection.query("UPDATE person_status_table SET student_registration_status = 1 WHERE person_id = ?", [person_id]);
+
+//     await connection.commit();
+//     res.json({ student_number });
+//   } catch (err) {
+//     await connection.rollback();
+//     console.error("Server error:", err);
+//     res.status(500).json({ error: "Server error" });
+//   } finally {
+//     connection.release();
+//   }
+// });
+
+//VERSION 3
+
+
+// ✅ Assign Student Number with Email Notification
 app.post("/api/assign-student-number", async (req, res) => {
   const connection = await pool.getConnection();
-  
   try {
-    const { person_id } = req.body;
+    const { person_id, curriculum_id } = req.body;
 
-    if (!person_id) {
-      return res.status(400).send("person_id is required");
+    if (!person_id || !curriculum_id) {
+      return res.status(400).json({ error: "person_id and curriculum_id are required" });
     }
 
     await connection.beginTransaction();
 
-    // Get active year
+    // 🔸 Get active year
     const [yearRows] = await connection.query("SELECT * FROM year_table WHERE status = 1 LIMIT 1");
     if (yearRows.length === 0) {
       await connection.rollback();
-      return res.status(400).send("No active year found");
+      return res.status(400).json({ error: "No active year found" });
     }
     const year = yearRows[0];
 
-    // Get counter
+    // 🔸 Get counter
     const [counterRows] = await connection.query("SELECT * FROM student_counter WHERE que_number_id = 1");
     if (counterRows.length === 0) {
       await connection.rollback();
-      return res.status(400).send("No counter found");
+      return res.status(400).json({ error: "No counter found" });
     }
-    let que_number = counterRows[0].que_number;
-
-    // Fix: if que_number is 0, still generate '00001'
-    que_number = que_number + 1;
-
-    let numberStr = que_number.toString();
-    while (numberStr.length < 5) {
-      numberStr = "0" + numberStr;
-    }
+    let que_number = counterRows[0].que_number + 1;
+    let numberStr = que_number.toString().padStart(5, "0");
     const student_number = `${year.year_description}${numberStr}`;
 
-    // Check if already assigned
+    // 🔸 Check if already assigned
     const [existingRows] = await connection.query("SELECT * FROM student_numbering WHERE person_id = ?", [person_id]);
     if (existingRows.length > 0) {
       await connection.rollback();
-      return res.status(400).send("Student number already assigned.");
+      return res.status(400).json({ error: "Student number already assigned." });
     }
 
-    // Insert into student_numbering
-    await connection.query("INSERT INTO student_numbering (student_number, person_id) VALUES (?, ?)", [student_number, person_id]);
+    // 🔸 Get active school year
+    const [yearResult] = await connection.query("SELECT active_school_year_id FROM active_school_year WHERE astatus = 1 LIMIT 1");
+    if (yearResult.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({ error: "No active school year found" });
+    }
+    const activeSchoolYearId = yearResult[0].active_school_year_id;
 
-    // Update counter
+    // 🔸 Insert student_number & status
+    await connection.query("INSERT INTO student_numbering (student_number, person_id) VALUES (?, ?)", [student_number, person_id]);
+    await connection.query("INSERT INTO student_status (student_number, active_curriculum, active_school_year_id, enrolled_status, year_level_id) VALUES (?, ?, ?, 0, 1)", [student_number, curriculum_id, activeSchoolYearId]);
+
+    // 🔸 Update counter
     await connection.query("UPDATE student_counter SET que_number = ?", [que_number]);
 
-    // Update person_status_table
+    // 🔸 Update person status
     await connection.query("UPDATE person_status_table SET student_registration_status = 1 WHERE person_id = ?", [person_id]);
+
+    // 🔸 Get person info (name & email)
+    const [personRows] = await connection.query("SELECT first_name, middle_name, last_name, email FROM person_table WHERE person_id = ?", [person_id]);
+    const person = personRows[0];
+
+    // 🔸 Get curriculum info
+    const [curriculumRows] = await connection.query(`
+      SELECT c.*, ct.*, yt.*
+      FROM curriculum as c
+      LEFT JOIN course_table as ct
+      ON ct.course_id = c.course_id
+      LEFT JOIN year_table as yt
+      ON yt.year_id = c.year_id
+      
+      WHERE curriculum_id = ?`, [curriculum_id]);
+    const program = curriculumRows[0]?.course_description || "your chosen program";
+
+    // 🔸 Compose email
+    const fullName = `${person.first_name} ${person.middle_name} ${person.last_name}`;
+    const mailOptions = {
+      from: '"EARIST Admissions Office" <disanjose@earist.edu.ph>',
+      to: person.email,
+      subject: "Congratulations! Your EARIST Application",
+      html: `
+        <p>Dear ${fullName},</p>
+        <p>We are pleased to inform you that your application to EARIST has been successful! Congratulations!</p>
+        <p><strong>Your student number is:</strong> ${student_number}</p>
+        <p>You have been approved to enroll in the <strong>${program}</strong> program.</p>
+        <p>We look forward to welcoming you to EARIST! Further instructions regarding enrollment will follow soon.</p>
+        <p>Sincerely,<br>The EARIST Admissions Team</p>
+      `,
+    };
+
+    // 🔸 Send email
+    await transporter.sendMail(mailOptions);
 
     await connection.commit();
     res.json({ student_number });
   } catch (err) {
     await connection.rollback();
     console.error("Server error:", err);
-    res.status(500).send("Server error");
+    res.status(500).json({ error: "Server error" });
   } finally {
-    connection.release(); // Release the connection back to the pool
+    connection.release();
+  }
+});
+
+
+
+app.get("/api/curriculum", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT c.*, ct.*, yt.*
+      FROM curriculum as c
+      LEFT JOIN course_table as ct
+      ON ct.course_id = c.course_id
+      LEFT JOIN year_table as yt
+      ON yt.year_id = c.year_id
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
   }
 });
 
